@@ -13,7 +13,8 @@ if __name__ == '__main__':
     parser.add_argument('--img', required=True)
     parser.add_argument('--h_planes', required=True)
     parser.add_argument('--v_planes', required=True)
-    parser.add_argument('--topview', action='store_true')
+    parser.add_argument('--mesh', action='store_true')
+    parser.add_argument('--mesh_show_back_face', action='store_true')
     args = parser.parse_args()
 
     # Read input
@@ -45,11 +46,42 @@ if __name__ == '__main__':
     pts_xyz = np.stack([xs, ys, zs], -1).reshape(-1, 3)
     pts_rgb = rgb.reshape(-1, 3) / 255
 
-    pcd = open3d.geometry.PointCloud()
-    pcd.points = open3d.utility.Vector3dVector(pts_xyz)
-    pcd.colors = open3d.utility.Vector3dVector(pts_rgb)
+    if args.mesh:
+        pid = np.arange(len(pts_xyz)).reshape(H_, W)
+        tri_cancididate = np.concatenate([
+            np.stack([
+                pid[:-1, :-1], pid[1:, :-1], np.roll(pid, -1, axis=1)[:-1, :-1],
+            ], -1),
+            np.stack([
+                pid[1:, :-1], np.roll(pid, -1, axis=1)[1:, :-1], np.roll(pid, -1, axis=1)[:-1, :-1],
+            ], -1)
+        ])
+        vparams, vid_mask = np.unique(v_planes.reshape(-1, 3), return_inverse=True, axis=0)
+        hparams, hid_mask = np.unique(h_planes.reshape(-1), return_inverse=True, axis=0)
+        faces = []
+        for i in range(len(vparams)):
+            if np.abs(vparams[i]).sum() == 0:
+                continue
+            mask = (vid_mask == i)
+            masktri = (mask[tri_cancididate].sum(-1) == 3)
+            faces.extend(tri_cancididate[masktri])
+        for i in range(len(hparams)):
+            if hparams[i] == 0:
+                continue
+            mask = (hid_mask == i)
+            masktri = (mask[tri_cancididate].sum(-1) == 3)
+            faces.extend(tri_cancididate[masktri])
+        scene = open3d.geometry.TriangleMesh()
+        scene.vertices = open3d.utility.Vector3dVector(pts_xyz)
+        scene.vertex_colors = open3d.utility.Vector3dVector(pts_rgb)
+        scene.triangles = open3d.utility.Vector3iVector(faces)
+    else:
+        scene = open3d.geometry.PointCloud()
+        scene.points = open3d.utility.Vector3dVector(pts_xyz)
+        scene.colors = open3d.utility.Vector3dVector(pts_rgb)
+
     open3d.visualization.draw_geometries([
-        pcd,
+        scene,
         open3d.geometry.TriangleMesh.create_coordinate_frame(size=0.3, origin=[0, 0, 0])
-    ])
+    ], mesh_show_back_face=args.mesh_show_back_face)
 
